@@ -209,12 +209,6 @@ body,html{width:100%;height:100%;background:var(--app-bg);font-family:-apple-sys
     onchange="saveApiKey(this.value)">
 </div>
 <div class="setting-row">
-  <div class="setting-info"><h3>API 代理地址</h3><p>可选。填入 Vercel 代理 URL 可绕过浏览器跨域限制</p></div>
-  <input type="text" id="inp-proxy-url" placeholder="https://your-app.vercel.app"
-    style="flex-shrink:0;background:rgba(255,255,255,0.1);color:#fff;border:none;padding:8px 12px;border-radius:10px;font-size:12px;width:180px;outline:none"
-    onchange="saveProxyUrl(this.value)">
-</div>
-<div class="setting-row">
   <div class="setting-info"><h3>AI 连接状态</h3><p id="ai-status-detail">检测中...</p></div>
   <span id="ai-status-badge" style="font-size:12px;color:var(--text-sub)">--</span>
 </div>
@@ -403,11 +397,8 @@ let currentCardCropB64 = '';
 	const DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
 	function detectAIBackend() {
-	  var proxyUrl = localStorage.getItem('ds_proxy_url');
 	  var apiKey = localStorage.getItem('ds_api_key');
-	  if (proxyUrl) aiBackend = 'proxy';
-	  else if (apiKey) aiBackend = 'direct';
-	  else aiBackend = 'none';
+	  aiBackend = apiKey ? 'direct' : 'none';
 	  updateAIStatus();
 	}
 
@@ -416,8 +407,7 @@ let currentCardCropB64 = '';
 	  const text = document.getElementById('ai-text');
 	  if (!dot || !text) return;
 	  const states = {
-	    proxy:  { cls: 'ready',  txt: 'AI: 代理模式' },
-	    direct: { cls: 'ready',  txt: 'AI: 直连' },
+	    direct: { cls: 'ready',  txt: 'AI: 已就绪' },
 	    none:   { cls: 'error',  txt: 'AI: 未配置' }
 	  };
 	  const s = states[aiBackend] || states.none;
@@ -428,7 +418,6 @@ let currentCardCropB64 = '';
 
 	function showAIStatusDetail() {
 	  const msgs = {
-	    proxy: '代理模式\n通过代理服务器调用 DeepSeek API',
 	    direct: '直连模式\nAPI Key 存储在浏览器本地',
 	    none: 'AI 服务未配置\n请在设置中填入 API Key'
 	  };
@@ -463,19 +452,12 @@ function setStatus(text,dot='ready'){
 function openSettings(){
   document.getElementById('settings-modal').classList.add('show');
   document.getElementById('inp-api-key').value = localStorage.getItem('ds_api_key') || '';
-  document.getElementById('inp-proxy-url').value = localStorage.getItem('ds_proxy_url') || '';
   document.getElementById('ai-status-detail').textContent = {
-    proxy: '代理模式（通过代理服务器调用）',
-    direct: '直连模式（Key 在浏览器本地）',
+    direct: '已就绪（Key 在浏览器本地）',
     none: '未配置 — 请填入 API Key'
   }[aiBackend] || '未知';
 }
 function closeSettings(){$('settings-modal').classList.remove('show')}
-function saveProxyUrl(val) {
-  if (val) localStorage.setItem('ds_proxy_url', val);
-  else localStorage.removeItem('ds_proxy_url');
-  detectAIBackend();
-}
 function saveApiKey(val) {
   if (val) localStorage.setItem('ds_api_key', val);
   else localStorage.removeItem('ds_api_key');
@@ -522,49 +504,12 @@ function cacheSet(key, result) {
   } catch (e) { console.warn('缓存写入失败:', e); }
 }
 
-// ─── DeepSeek API 调用 ───────────────────────────────────────
+// ─── DeepSeek API 调用（浏览器直连） ──────────────────────────
 async function callDeepSeek(messages) {
   var apiKey = localStorage.getItem('ds_api_key');
-  var proxyUrl = localStorage.getItem('ds_proxy_url');
-
-  if (!apiKey && !proxyUrl) {
+  if (!apiKey) {
     return { success: false, error: 'AI 服务未配置。请在设置中填入 API Key' };
   }
-
-  var reqBody = {
-    model: DEEPSEEK_MODEL,
-    messages: messages,
-    max_tokens: 300
-  };
-
-  // 代理模式：通过 Vercel 代理转发
-  if (proxyUrl) {
-    try {
-      var resp = await fetch(proxyUrl + '/api/deepseek', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKey, model: reqBody.model, messages: reqBody.messages, max_tokens: reqBody.max_tokens })
-      });
-      if (!resp.ok) {
-        var errData = await resp.json().catch(function() { return {}; });
-        throw new Error(errData.error || 'HTTP ' + resp.status);
-      }
-      var data = await resp.json();
-      var content = data.choices ? data.choices[0].message.content : '';
-      return { success: true, content: content };
-    } catch (e) {
-      console.warn('代理调用失败:', e.message);
-      // 如果代理失败且有 API Key，回退到直连
-      if (apiKey) return callDeepSeekDirect(reqBody, apiKey);
-      return { success: false, error: '代理不可用: ' + e.message };
-    }
-  }
-
-  // 直连模式：浏览器直接调用 DeepSeek API
-  return callDeepSeekDirect(reqBody, apiKey);
-}
-
-async function callDeepSeekDirect(reqBody, apiKey) {
   try {
     var resp = await fetch(DIRECT_API_URL, {
       method: 'POST',
@@ -572,7 +517,7 @@ async function callDeepSeekDirect(reqBody, apiKey) {
         'Authorization': 'Bearer ' + apiKey,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(reqBody)
+      body: JSON.stringify({ model: DEEPSEEK_MODEL, messages: messages, max_tokens: 300 })
     });
     if (!resp.ok) {
       if (resp.status === 401) return { success: false, error: 'API Key 无效，请检查设置' };
@@ -580,8 +525,7 @@ async function callDeepSeekDirect(reqBody, apiKey) {
       return { success: false, error: 'API 错误 (' + resp.status + ')' };
     }
     var data = await resp.json();
-    var content = data.choices ? data.choices[0].message.content : '';
-    return { success: true, content: content };
+    return { success: true, content: data.choices[0].message.content };
   } catch (e) {
     return { success: false, error: '网络连接失败: ' + e.message };
   }
