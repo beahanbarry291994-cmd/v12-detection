@@ -591,16 +591,15 @@ async function runYolo(mediaEl){
   else offCtx.filter='none';
   offCtx.drawImage(mediaEl,padX,padY,w*scale,h*scale);
 
-  // 不使用 dataSync() 阻塞 UI，改用异步提取数据并手动回收内存
-  const t = tf.browser.fromPixels(offscreen).div(255).expandDims(0);
-  const out = yoloModel.predict(t);
-  const trans = out.transpose([0,2,1]);
-  const raw = await trans.data(); // 异步等待，UI可以继续渲染特效
-
-  // 手动清理防止内存溢出
-  t.dispose();
-  out.dispose();
-  trans.dispose();
+  // tf.tidy 包裹推理，自动回收所有中间张量，防止内存泄漏
+  const {t, out, trans} = tf.tidy(function(){
+    const t0 = tf.browser.fromPixels(offscreen).div(255).expandDims(0);
+    const out0 = yoloModel.predict(t0);
+    const trans0 = out0.transpose([0,2,1]);
+    return {t: t0, out: out0, trans: trans0};
+  });
+  const raw = await trans.data();
+  t.dispose(); out.dispose(); trans.dispose();
 
   const boxes=[];
   const thresh=appSettings.baseThreshold;
@@ -783,7 +782,7 @@ function clearAll(){
 	      5000
 	    );
 	    $('progress-bar').style.width='100%';
-	    tf.tidy(function(){yoloModel.predict(tf.zeros([1,640,640,3]));});
+	    (function(){var z=tf.zeros([1,640,640,3]);yoloModel.predict(z).dispose();z.dispose();})();
 	    setTimeout(function(){
 	      $('progress-container').style.opacity='0';
 	      setStatus('YOLOv8 就绪 - 80类目标 (缓存)','ready');
@@ -836,7 +835,7 @@ function clearAll(){
 	  }
 
 	  // 4) Warm up + done
-	  tf.tidy(function(){yoloModel.predict(tf.zeros([1,640,640,3]));});
+	  (function(){var z=tf.zeros([1,640,640,3]);yoloModel.predict(z).dispose();z.dispose();})();
 	  $('progress-bar').style.width='100%';
 	  setTimeout(function(){
 	    $('progress-container').style.opacity='0';
@@ -910,22 +909,30 @@ async function toggleLive(){
     $('shutter-inner').style.background='var(--live-red)';
     setStatus('YOLOv8 实时计算中','ready');clearAll();
     const ctx=$('overlay').getContext('2d');
-    async function detectLoop(){
+    var yoloBusy=false;
+    var lastDetectTime=0;
+    var MIN_INTERVAL=150; // 最少 150ms 一帧，防止手机过载
+    async function detectLoop(ts){
       if(!liveRunning)return;
       if(video.readyState===4){
         syncCanvasSize();
         const rp=getMediaRenderParams(video,vp,'cover');
-        if(frameCount%2===0){
-          const preds=await runYolo(video);
-          lastPreds=preds;
-          trackerData=updateTracker(preds);
+        // 防止重入 + 节流
+        if(!yoloBusy && (ts-lastDetectTime)>MIN_INTERVAL){
+          yoloBusy=true;
+          lastDetectTime=ts;
+          runYolo(video).then(function(preds){
+            lastPreds=preds;
+            trackerData=updateTracker(preds);
+            yoloBusy=false;
+          }).catch(function(){yoloBusy=false;});
         }
-        drawBoxes(ctx,trackerData,rp);
+        drawBoxes(ctx,lastPreds.length?trackerData:[],rp);
         frameCount++;
       }
       if(liveRunning)requestAnimationFrame(detectLoop);
     }
-    detectLoop();
+    requestAnimationFrame(detectLoop);
   }catch(err){setStatus('摄像头访问失败','error');}
 }
 function stopLive(){
