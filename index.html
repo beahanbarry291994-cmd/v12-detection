@@ -179,13 +179,6 @@ body,html{width:100%;height:100%;background:var(--app-bg);font-family:-apple-sys
       <button class="btn-close" onclick="closeSettings()">✕</button>
     </div>
     <div class="setting-row">
-      <div class="setting-info"><h3>检测模型</h3><p>n=轻量快速 / s=高精度</p></div>
-      <select class="apple-select" id="sel-model" onchange="switchModel(this.value)">
-        <option value="n">YOLOv8n (快速)</option>
-        <option value="s">YOLOv8s (精准)</option>
-      </select>
-    </div>
-    <div class="setting-row">
       <div class="setting-info"><h3>界面主题</h3><p>切换深色/浅色界面</p></div>
       <select class="apple-select" id="sel-theme" onchange="switchTheme(this.value)">
         <option value="dark">深色模式</option>
@@ -357,29 +350,13 @@ function onTfReady(fn) {
 	})();
 
 // ─── YOLO 配置 ────────────────────────────────────────────────
-// 多 CDN 链式回退 + IndexedDB 持久缓存 + 多模型支持
-const MODEL_CONFIGS = {
-  n: {
-    cacheKey: 'yolov8n_v2',
-    urls: [
-      'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json',
-      'https://jsd.cdn.zzko.cn/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json',
-      'https://cdn.jsdmirror.com/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json'
-    ],
-    name: 'YOLOv8n',
-    desc: '轻量快速'
-  },
-  s: {
-    cacheKey: 'yolov8s_v2',
-    urls: [
-      'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8s_web_model/model.json',
-      'https://jsd.cdn.zzko.cn/gh/Hyuto/yolov8-tfjs@master/public/yolov8s_web_model/model.json',
-      'https://cdn.jsdmirror.com/gh/Hyuto/yolov8-tfjs@master/public/yolov8s_web_model/model.json'
-    ],
-    name: 'YOLOv8s',
-    desc: '高精度'
-  }
-};
+// 多 CDN 链式回退 + IndexedDB 持久缓存
+const MODEL_CACHE_KEY = 'yolov8n_v2';
+const MODEL_CDN_URLS = [
+  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json',
+  'https://jsd.cdn.zzko.cn/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json',
+  'https://cdn.jsdmirror.com/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json'
+];
 
 const YOLO_CLASSES = [
   "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat",
@@ -457,7 +434,7 @@ const PALETTE = ['#FFD60A','#32D74B','#0A84FF','#FF9F0A','#FF375F','#BF5AF2','#5
 const appSettings = {
   useFrontCam:false, highAccuracy:true, nightVision:true,
   showHud:true, cloudCollab:true, targetScope:'all', baseThreshold:0.20, voiceTTS:true,
-  modelSize:'n', theme:'dark', boxStyle:'corner'
+  theme:'dark', boxStyle:'corner'
 };
 
 let yoloModel=null, isZH=true, currentMode='snap', liveStream=null, liveRunning=false;
@@ -531,7 +508,6 @@ function openSettings(){
     none: '未配置 — 请填入 API Key'
   }[aiBackend] || '未知';
   // 同步新设置项
-  document.getElementById('sel-model').value = appSettings.modelSize;
   document.getElementById('sel-theme').value = appSettings.theme;
   document.getElementById('sel-box').value = appSettings.boxStyle;
 }
@@ -609,13 +585,6 @@ async function callDeepSeek(messages) {
   }
 }
 function updateScope(val){appSettings.targetScope=val}
-function switchModel(size){
-  if(size===appSettings.modelSize)return;
-  appSettings.modelSize=size;
-  localStorage.setItem('modelSize',size);
-  yoloModel=null;
-  loadModel();
-}
 function switchTheme(theme){
   appSettings.theme=theme;
   localStorage.setItem('theme',theme);
@@ -873,9 +842,8 @@ function clearAll(){
 
 	// --- 加载与控制流 -----------------------------------------------
 	async function loadModel(){
-	  const modelConfig = MODEL_CONFIGS[appSettings.modelSize] || MODEL_CONFIGS.n;
 	  $('progress-container').style.opacity='1';
-	  setStatus(modelConfig.name + ' 加载中...','loading');
+	  setStatus('YOLOv8 加载中...','loading');
 	  $('progress-bar').style.width='0%';
 	  await tf.ready();
 
@@ -883,14 +851,14 @@ function clearAll(){
 	  try {
 	    setStatus('读取本地缓存...','loading');
 	    yoloModel = await promiseWithTimeout(
-	      tf.loadGraphModel('indexeddb://'+modelConfig.cacheKey),
+	      tf.loadGraphModel('indexeddb://'+MODEL_CACHE_KEY),
 	      5000
 	    );
 	    $('progress-bar').style.width='100%';
 	    (function(){var z=tf.zeros([1,640,640,3]);yoloModel.predict(z).dispose();z.dispose();})();
 	    setTimeout(function(){
 	      $('progress-container').style.opacity='0';
-	      setStatus(modelConfig.name + ' 就绪 - 80类目标 (缓存)','ready');
+	      setStatus('YOLOv8 就绪 - 80类目标 (缓存)','ready');
 	      detectAIBackend();
 	    },400);
 	    console.log('YOLO: IndexedDB cache hit');
@@ -901,10 +869,10 @@ function clearAll(){
 
 	  // 2) CDN fallback chain with real progress
 	  let loaded = false;
-	  for (let i=0; i<modelConfig.urls.length; i++) {
-	    const url = modelConfig.urls[i];
+	  for (let i=0; i<MODEL_CDN_URLS.length; i++) {
+	    const url = MODEL_CDN_URLS[i];
 	    try {
-	      setStatus('下载'+modelConfig.name+' ('+(i+1)+'/'+modelConfig.urls.length+')...','loading');
+	      setStatus('下载模型 ('+(i+1)+'/'+MODEL_CDN_URLS.length+')...','loading');
 	      $('progress-bar').style.width='5%';
 	      console.log('YOLO: trying CDN', url);
 	      yoloModel = await promiseWithTimeout(
@@ -933,7 +901,7 @@ function clearAll(){
 
 	  // 3) Save to IndexedDB
 	  try {
-	    await yoloModel.save('indexeddb://'+modelConfig.cacheKey);
+	    await yoloModel.save('indexeddb://'+MODEL_CACHE_KEY);
 	    console.log('YOLO: saved to IndexedDB');
 	  } catch(e) {
 	    console.warn('YOLO: IndexedDB save failed', e.message);
@@ -944,7 +912,7 @@ function clearAll(){
 	  $('progress-bar').style.width='100%';
 	  setTimeout(function(){
 	    $('progress-container').style.opacity='0';
-	    setStatus(modelConfig.name + ' 就绪 - 80类目标','ready');
+	    setStatus('YOLOv8 就绪 - 80类目标','ready');
 	    detectAIBackend();
 	  },400);
 	}
@@ -1356,8 +1324,6 @@ async function showAreaAnalysis(x, y) {
 (function(){
   const savedTheme=localStorage.getItem('theme');
   if(savedTheme){appSettings.theme=savedTheme;document.documentElement.setAttribute('data-theme',savedTheme);}
-  const savedModel=localStorage.getItem('modelSize');
-  if(savedModel&&MODEL_CONFIGS[savedModel])appSettings.modelSize=savedModel;
   const savedBox=localStorage.getItem('boxStyle');
   if(savedBox)appSettings.boxStyle=savedBox;
 })();
