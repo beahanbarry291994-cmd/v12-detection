@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>视觉检测 V12 · YOLOv8s + DeepSeek</title>
+<style>
+:root {
+  --app-bg:#000; --glass-bg:rgba(30,30,30,0.45); --glass-border:rgba(255,255,255,0.15);
+  --glass-blur:blur(28px) saturate(200%); --text-main:#fff; --text-sub:rgba(255,255,255,0.6);
+  --accent:#FFD60A; --live-red:#FF453A; --apple-blue:#0A84FF;
+  --apple-green:#32D74B; --apple-purple:#BF5AF2; --max-ui-width:500px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body,html{width:100%;height:100%;background:var(--app-bg);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;color:var(--text-main);overflow:hidden;overscroll-behavior:none}
+
+#viewport{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#111;overflow:hidden}
+#video,#static-img{position:absolute;width:100%;height:100%;z-index:1;transition:filter 0.3s}
+#video{object-fit:cover}
+#static-img{object-fit:contain;display:none;background:#000}
+.night-vision-on{filter:brightness(1.3) contrast(1.1) saturate(1.2)}
+#overlay{position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:auto}
+
+#progress-container{position:absolute;top:0;left:0;width:100%;height:3px;background:rgba(255,255,255,0.1);z-index:100;opacity:0;transition:opacity 0.3s}
+#progress-bar{width:0%;height:100%;background:var(--apple-blue);box-shadow:0 0 10px var(--apple-blue);transition:width 0.2s ease-out}
+
+#ui-layer{position:absolute;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--max-ui-width);height:100%;z-index:10;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:env(safe-area-inset-top,20px) env(safe-area-inset-right,16px) env(safe-area-inset-bottom,30px) env(safe-area-inset-left,16px)}
+.interactive{pointer-events:auto}
+
+#top-bar{display:flex;justify-content:space-between;align-items:flex-start;padding:10px;margin-top:5px}
+.glass-pill{background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:0.5px solid var(--glass-border);border-radius:999px;padding:8px 16px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+.status-indicator{width:8px;height:8px;border-radius:50%;background:#555;transition:background 0.3s}
+.status-indicator.loading{background:#FF9F0A;animation:pulse 1.5s infinite}
+.status-indicator.ready{background:var(--apple-green)}
+.status-indicator.error{background:var(--live-red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+#status-text{font-size:13px;font-weight:500;letter-spacing:0.3px;display:flex;gap:4px}
+.progress-pct{color:var(--apple-blue);font-weight:700}
+
+.top-btns{display:flex;gap:10px}
+.icon-btn{background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:0.5px solid var(--glass-border);color:#fff;width:38px;height:38px;border-radius:19px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);transition:transform 0.2s cubic-bezier(0.2,0.8,0.2,1)}
+.icon-btn:active{transform:scale(0.85)}
+
+#analytics-hud{position:absolute;top:70px;left:26px;z-index:10;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:0.5px solid var(--glass-border);border-radius:14px;padding:12px;min-width:120px;display:none;flex-direction:column;gap:6px;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,0.3)}
+#analytics-hud.show{display:flex}
+.hud-title{font-size:10px;color:var(--text-sub);text-transform:uppercase;font-weight:600;margin-bottom:4px;letter-spacing:0.5px}
+.hud-row{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:500}
+.hud-dot-wrap{display:flex;align-items:center;gap:6px}
+.hud-dot{width:8px;height:8px;border-radius:4px}
+.hud-count{font-weight:700;font-variant-numeric:tabular-nums}
+
+#bottom-area{display:flex;flex-direction:column;gap:20px;padding-bottom:20px}
+#mode-dial{display:flex;justify-content:center;gap:24px;font-size:13px;font-weight:600;color:var(--text-sub);margin-bottom:10px}
+.mode-item{cursor:pointer;transition:color 0.3s;text-transform:uppercase;letter-spacing:0.5px}
+.mode-item.active{color:var(--accent)}
+
+#shutter-container{display:flex;justify-content:center;align-items:center;height:80px}
+#shutter-btn{width:72px;height:72px;border-radius:36px;background:transparent;border:4px solid white;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s cubic-bezier(0.2,0.8,0.2,1)}
+#shutter-btn:active{transform:scale(0.92)}
+#shutter-inner{width:54px;height:54px;border-radius:27px;background:white;transition:all 0.3s cubic-bezier(0.2,0.8,0.2,1);display:flex;align-items:center;justify-content:center;color:black}
+#shutter-btn.is-live-running #shutter-inner{border-radius:12px;width:32px;height:32px;background:var(--live-red)}
+#shutter-btn.is-live-running{border-color:rgba(255,255,255,0.5)}
+.icon-svg{width:24px;height:24px;opacity:0;display:none}
+#shutter-inner.show-upload #icon-upload{opacity:1;display:block}
+
+.modal-overlay{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:50;display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.3s cubic-bezier(0.25,1,0.5,1)}
+.modal-overlay.show{opacity:1;pointer-events:auto}
+#settings-modal .modal-content{width:100%;max-width:var(--max-ui-width);background:rgba(30,30,30,0.85);backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border-radius:24px 24px 0 0;padding:24px;transform:translateY(100%);transition:transform 0.4s cubic-bezier(0.175,0.885,0.32,1.1);border-top:0.5px solid var(--glass-border);max-height:85vh;overflow-y:auto}
+#settings-modal.show .modal-content{transform:translateY(0)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;position:sticky;top:0;z-index:2}
+.modal-header h2{font-size:18px;font-weight:600;margin:0;letter-spacing:0.5px}
+.btn-close{width:30px;height:30px;border-radius:15px;background:rgba(255,255,255,0.1);border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px}
+.setting-row{display:flex;justify-content:space-between;align-items:center;padding:16px 0;border-bottom:0.5px solid rgba(255,255,255,0.1)}
+.setting-row:last-child{border-bottom:none}
+.setting-info{flex:1;padding-right:16px}
+.setting-info h3{font-size:15px;font-weight:500;margin:0 0 6px 0;letter-spacing:0.5px}
+.setting-info p{font-size:12px;color:var(--text-sub);margin:0;line-height:1.4}
+.apple-select{flex-shrink:0;background:rgba(255,255,255,0.1);color:#fff;border:none;padding:8px 12px;border-radius:10px;font-size:13px;font-weight:500;outline:none;appearance:none;text-align:right;cursor:pointer;max-width:140px}
+.apple-select option{background:#222;color:#fff}
+.toggle-switch{flex-shrink:0;width:46px;height:26px;background:#39393d;border-radius:13px;position:relative;cursor:pointer;transition:background 0.3s}
+.toggle-switch.on{background:var(--apple-green)}
+.toggle-knob{width:22px;height:22px;background:#fff;border-radius:50%;position:absolute;top:2px;left:2px;transition:transform 0.3s cubic-bezier(0.2,0.8,0.2,1);box-shadow:0 2px 4px rgba(0,0,0,0.2)}
+.toggle-switch.on .toggle-knob{transform:translateX(20px)}
+
+#knowledge-sheet{z-index:60;align-items:center}
+#knowledge-sheet .modal-content{width:calc(100% - 32px);max-width:400px;background:rgba(25,25,25,0.85);backdrop-filter:blur(50px) saturate(200%);-webkit-backdrop-filter:blur(50px) saturate(200%);border-radius:28px;padding:20px;transform:scale(0.9) translateY(10px);opacity:0;transition:all 0.35s cubic-bezier(0.175,0.885,0.32,1.1);border:1px solid var(--glass-border);box-shadow:0 20px 40px rgba(0,0,0,0.5);margin-bottom:0}
+#knowledge-sheet.show .modal-content{transform:scale(1) translateY(0);opacity:1}
+.knowledge-img-wrap{width:100%;height:160px;border-radius:16px;overflow:hidden;margin-bottom:16px;background:#000;position:relative}
+.knowledge-img-wrap img{width:100%;height:100%;object-fit:cover;opacity:0.9}
+.k-badge{position:absolute;top:12px;left:12px;background:rgba(0,0,0,0.6);backdrop-filter:blur(10px);padding:6px 12px;border-radius:12px;font-size:11px;font-weight:600;display:flex;align-items:center;gap:4px}
+.k-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--apple-green);box-shadow:0 0 6px var(--apple-green)}
+.k-badge.cloud-mode::before{background:var(--apple-purple);box-shadow:0 0 6px var(--apple-purple)}
+.k-title{font-size:22px;font-weight:700;margin:0 0 6px 0;color:#fff}
+.k-sub{font-size:13px;color:var(--accent);font-weight:600;margin:0 0 12px 0;text-transform:uppercase;letter-spacing:0.5px}
+.k-desc{font-size:14px;color:rgba(255,255,255,0.85);line-height:1.6;max-height:160px;overflow-y:auto}
+.k-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 0;gap:16px;color:var(--text-sub);font-size:14px}
+.spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,0.1);border-top-color:var(--apple-blue);border-radius:50%;animation:spin 1s linear infinite}
+.btn-external{display:block;width:100%;padding:12px;background:rgba(255,255,255,0.1);border-radius:12px;text-align:center;color:#fff;text-decoration:none;font-size:14px;font-weight:600;margin-top:16px;transition:background 0.2s}
+.btn-external:active{background:rgba(255,255,255,0.2)}
+.btn-deep-analysis{display:block;width:100%;padding:12px;background:linear-gradient(135deg,rgba(191,90,242,0.3),rgba(10,132,255,0.3));border:1px solid rgba(191,90,242,0.4);border-radius:12px;color:#fff;text-align:center;font-size:14px;font-weight:600;margin-top:12px;cursor:pointer;transition:all 0.2s}
+.btn-deep-analysis:active{transform:scale(0.96);opacity:0.8}
+.k-badge.ai-instant{background:rgba(191,90,242,0.3)}
+.k-badge.ai-instant::before{background:var(--apple-purple);box-shadow:0 0 6px var(--apple-purple)}
+.k-badge.ai-deep{background:rgba(10,132,255,0.3)}
+.k-badge.ai-deep::before{background:var(--apple-blue);box-shadow:0 0 6px var(--apple-blue)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.touch-ripple{position:absolute;width:40px;height:40px;background:rgba(255,255,255,0.5);border-radius:50%;transform:translate(-50%,-50%) scale(0);opacity:1;pointer-events:none;animation:rippleAnim 0.6s ease-out forwards;z-index:20}
+@keyframes rippleAnim{to{transform:translate(-50%,-50%) scale(2.5);opacity:0}}
+#qr-box{position:fixed;bottom:20px;right:20px;z-index:999;background:rgba(30,30,30,0.9);border-radius:16px;padding:12px;border:1px solid rgba(255,255,255,0.15);text-align:center;display:none}
+#qr-box img{width:140px;height:140px;display:block}
+#qr-box span{font-size:11px;color:rgba(255,255,255,0.5);margin-top:6px;display:block}
+@media(min-width:600px){#qr-box{display:block}}
+</style>
+</head>
+<body>
+<div id="qr-box"><span>📱 手机扫码访问</span><img id="qr-img" src="" alt="QR"></div>
+
+<div id="progress-container"><div id="progress-bar"></div></div>
+<div id="viewport">
+  <video id="video" autoplay muted playsinline></video>
+  <img id="static-img" alt="preview">
+  <canvas id="overlay"></canvas>
+</div>
+<div id="analytics-hud">
+  <div class="hud-title" id="hud-title">全局分类统计</div>
+  <div id="hud-content"></div>
+</div>
+
+<div id="ui-layer">
+  <div id="top-bar" class="interactive">
+    <div class="glass-pill" onclick="showAIStatusDetail()" style="cursor:pointer">
+      <div class="status-indicator loading" id="status-dot"></div>
+      <div id="status-text">加载 YOLOv8 模型...</div>
+      <span style="color:rgba(255,255,255,0.15);margin:0 2px">|</span>
+      <div class="status-indicator loading" id="ai-dot" style="width:6px;height:6px"></div>
+      <span id="ai-text" style="font-size:11px;color:rgba(255,255,255,0.5)">AI: 检测中...</span>
+    </div>
+    <div class="top-btns">
+      <button class="icon-btn" onclick="toggleLang()" id="btn-lang">EN</button>
+      <button class="icon-btn" onclick="openSettings()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+  <div id="bottom-area" class="interactive">
+    <div id="mode-dial">
+      <div class="mode-item" id="mode-upload" onclick="setMode('upload')">静态解析</div>
+      <div class="mode-item active" id="mode-snap" onclick="setMode('snap')">单帧捕获</div>
+      <div class="mode-item" id="mode-live" onclick="setMode('live')">实时计算</div>
+    </div>
+    <div id="shutter-container">
+      <button id="shutter-btn" onclick="onMainAction()">
+        <div id="shutter-inner">
+          <svg id="icon-upload" class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div id="settings-modal" class="modal-overlay interactive">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>模型与偏好设置</h2>
+      <button class="btn-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>专业识别领域</h3><p>细分目标特化，屏蔽视觉杂波</p></div>
+      <select class="apple-select" id="sel-scope" onchange="updateScope(this.value)">
+        <option value="all">全域识别</option>
+        <option value="person">人物特化</option>
+        <option value="vehicle">交通载具</option>
+        <option value="animal">动物生态</option>
+        <option value="electronics">电子设备</option>
+        <option value="furniture">室内家居</option>
+        <option value="food">餐饮食物</option>
+        <option value="sports">运动器械</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>高精度推理模式</h3><p>降低过滤阈值，捕获微小目标</p></div>
+      <div class="toggle-switch on" id="tog-acc" onclick="toggleSetting('accuracy')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>AI 深度分析</h3><p>点击目标，DeepSeek 智能识别与详解</p></div>
+      <div class="toggle-switch on" id="tog-card" onclick="toggleSetting('card')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>暗光图像增强</h3><p>底层拉升感光度，优化暗光场景</p></div>
+      <div class="toggle-switch on" id="tog-night" onclick="toggleSetting('night')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>全息统计仪表盘</h3><p>悬浮显示视野内目标分类与分布</p></div>
+      <div class="toggle-switch on" id="tog-hud" onclick="toggleSetting('hud')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>前置 / 后置镜头</h3><p>反转设备图像采集视角</p></div>
+      <div class="toggle-switch" id="tog-cam" onclick="toggleSetting('camera')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>语音无障碍播报</h3><p>自动朗读识别结果与百科内容</p></div>
+      <div class="toggle-switch on" id="tog-voice" onclick="toggleSetting('voice')"><div class="toggle-knob"></div></div>
+    </div>
+<div class="setting-row">
+  <div class="setting-info"><h3>DeepSeek API Key</h3><p>仅存储在浏览器本地，不上传。填写后可使用 AI 深度分析</p></div>
+  <input type="password" id="inp-api-key" placeholder="sk-..."
+    style="flex-shrink:0;background:rgba(255,255,255,0.1);color:#fff;border:none;padding:8px 12px;border-radius:10px;font-size:12px;width:160px;outline:none"
+    onchange="saveApiKey(this.value)">
+</div>
+<div class="setting-row">
+  <div class="setting-info"><h3>API 代理地址</h3><p>可选。填入 Vercel 代理 URL 可绕过浏览器跨域限制</p></div>
+  <input type="text" id="inp-proxy-url" placeholder="https://your-app.vercel.app"
+    style="flex-shrink:0;background:rgba(255,255,255,0.1);color:#fff;border:none;padding:8px 12px;border-radius:10px;font-size:12px;width:180px;outline:none"
+    onchange="saveProxyUrl(this.value)">
+</div>
+<div class="setting-row">
+  <div class="setting-info"><h3>AI 连接状态</h3><p id="ai-status-detail">检测中...</p></div>
+  <span id="ai-status-badge" style="font-size:12px;color:var(--text-sub)">--</span>
+</div>
+  </div>
+</div>
+
+<!-- Knowledge Card -->
+<div id="knowledge-sheet" class="modal-overlay interactive">
+  <div class="modal-content">
+    <div class="modal-header" style="margin-bottom:16px">
+      <h2>实体特征图谱</h2>
+      <button class="btn-close" onclick="$('knowledge-sheet').classList.remove('show'); if(window.speechSynthesis) window.speechSynthesis.cancel();">✕</button>
+    </div>
+    <div id="k-loading-area" class="k-loading">
+      <div class="spinner"></div>
+      <div id="k-loading-txt">正在检索知识库...</div>
+    </div>
+    <div id="k-content-area" style="display:none">
+      <div class="knowledge-img-wrap">
+        <div class="k-badge" id="k-badge">本地知识库</div>
+        <img id="k-img" src="" alt="crop">
+      </div>
+      <h3 class="k-title" id="k-title"></h3>
+      <p class="k-sub" id="k-sub"></p>
+      <div class="k-desc" id="k-desc"></div>
+      <a href="#" id="k-link" target="_blank" class="btn-external">在百度百科中查看详细资料</a>
+      <button id="btn-deep-analysis" class="btn-deep-analysis" onclick="triggerDeepAnalysis()" style="display:none">
+        ✨ DeepSeek 深度分析
+      </button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" onchange="handleFile(event)" style="display:none">
+
+<script>
+// ─── TF.js 动态加载 + 多 CDN 回退 ───────────────────────────
+window.__tfLoaded = false;
+window.__tfCallbacks = [];
+function onTfReady(fn) {
+  if (window.__tfLoaded) fn();
+  else window.__tfCallbacks.push(fn);
+}
+(function() {
+  var TF_CDN_URLS = [
+    'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js',
+    'https://unpkg.com/@tensorflow/tfjs@4.10.0/dist/tf.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.10.0/tf.min.js'
+  ];
+  var CDN_TIMEOUT = 8000;
+  var currentIdx = 0;
+
+  function showTfError(msg) {
+    document.body.innerHTML =
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'height:100vh;background:#000;color:#fff;font-family:system-ui;text-align:center;padding:20px">' +
+      '<div style="font-size:48px;margin-bottom:20px">&#x26A0;&#xFE0F;</div>' +
+      '<h2 style="margin:0 0 12px;font-size:20px">TensorFlow.js 加载失败</h2>' +
+      '<p style="color:rgba(255,255,255,0.6);font-size:14px;margin:0 0 24px;max-width:400px">' + msg + '</p>' +
+      '<button onclick="location.reload()" style="background:#0A84FF;color:#fff;border:none;padding:12px 32px;' +
+      'border-radius:12px;font-size:16px;cursor:pointer">重试</button></div>';
+  }
+
+  function onTfScriptLoaded() {
+    window.__tfLoaded = true;
+    window.__tfCallbacks.forEach(function(fn) { fn(); });
+    window.__tfCallbacks = [];
+  }
+
+  function tryLoadNext() {
+    if (currentIdx >= TF_CDN_URLS.length) {
+      showTfError('所有 CDN 源均不可用，请检查网络连接后重试');
+      return;
+    }
+    var url = TF_CDN_URLS[currentIdx];
+    console.log('TF.js: trying', url);
+    var script = document.createElement('script');
+    script.src = url;
+    var timeout = setTimeout(function() {
+      console.warn('TF.js: timeout', url);
+      script.onload = script.onerror = null;
+      currentIdx++;
+      tryLoadNext();
+    }, CDN_TIMEOUT);
+    script.onload = function() {
+      clearTimeout(timeout);
+      console.log('TF.js: loaded from', url);
+      onTfScriptLoaded();
+    };
+    script.onerror = function() {
+      clearTimeout(timeout);
+      console.warn('TF.js: error', url);
+      currentIdx++;
+      tryLoadNext();
+    };
+    document.head.appendChild(script);
+  }
+
+  tryLoadNext();
+})();
+
+	// ─── 二维码生成 ──────────────────
+	(function(){
+	  var qrImg = document.getElementById('qr-img');
+	  if (!qrImg) return;
+	  var pageUrl = window.location.href;
+	  qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(pageUrl);
+	})();
+
+// ─── YOLO 配置 ────────────────────────────────────────────────
+// 多 CDN 链式回退 + IndexedDB 持久缓存
+const MODEL_CACHE_KEY = 'yolov8n_v2';
+	const MODEL_CDN_URLS = [
+	  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json',
+	  'https://jsd.cdn.zzko.cn/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json',
+	  'https://cdn.jsdmirror.com/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json'
+	];
+
+const YOLO_CLASSES = [
+  "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat",
+  "traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat",
+  "dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack",
+  "umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball",
+  "kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket",
+  "bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple",
+  "sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake",
+  "chair","couch","potted plant","bed","dining table","toilet","tv","laptop",
+  "mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink",
+  "refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"
+];
+
+const LABELS_ZH = {
+  person:'人',car:'汽车',truck:'货车',bus:'公交车',motorcycle:'摩托车',bicycle:'自行车',
+  dog:'狗',cat:'猫',bird:'鸟',horse:'马',cow:'牛',sheep:'羊',elephant:'大象',
+  bear:'熊',zebra:'斑马',giraffe:'长颈鹿',chair:'椅子',couch:'沙发',bed:'床',toilet:'马桶',
+  'dining table':'餐桌',tv:'电视',laptop:'笔记本电脑',mouse:'鼠标',keyboard:'键盘',
+  'cell phone':'手机',book:'书',bottle:'瓶子',cup:'杯子','sports ball':'球',
+  backpack:'背包',umbrella:'雨伞',handbag:'手提包',suitcase:'行李箱',
+  'traffic light':'交通信号灯','stop sign':'停止标志',airplane:'飞机',boat:'船',
+  clock:'时钟',vase:'花瓶',scissors:'剪刀','potted plant':'盆栽',
+  banana:'香蕉',apple:'苹果',pizza:'披萨','hot dog':'热狗',cake:'蛋糕',
+  sandwich:'三明治',donut:'甜甜圈',fork:'叉子',knife:'餐刀',spoon:'勺子',bowl:'碗',
+  refrigerator:'冰箱',microwave:'微波炉',oven:'烤箱',toaster:'烤面包机',
+  'wine glass':'酒杯',fire_hydrant:'消防栓',bench:'长椅',kite:'风筝',
+  tie:'领带',skateboard:'滑板',surfboard:'冲浪板','tennis racket':'网球拍',
+  'baseball bat':'棒球棒','baseball glove':'棒球手套',remote:'遥控器',
+  train:'列车','parking meter':'停车计费器',frisbee:'飞盘',skis:'滑雪板',
+  snowboard:'单板滑雪',carrot:'胡萝卜',broccoli:'西兰花',orange:'橙子',
+  'teddy bear':'泰迪熊','hair drier':'吹风机',toothbrush:'牙刷',sink:'水槽'
+};
+
+const SCOPE_MAP = {
+  person:['person'],
+  vehicle:['car','motorcycle','airplane','bus','train','truck','boat','bicycle'],
+  animal:['bird','cat','dog','horse','sheep','cow','elephant','bear','zebra','giraffe'],
+  electronics:['tv','laptop','mouse','remote','keyboard','cell phone'],
+  furniture:['chair','couch','potted plant','bed','dining table','toilet','sink','refrigerator'],
+  food:['bottle','wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange','broccoli','carrot','hot dog','pizza','donut','cake'],
+  sports:['frisbee','skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket'],
+};
+
+const LOCAL_KB = {
+  person:{title:'人',sub:'PERSON · 灵长类哺乳动物',desc:'人（Homo sapiens），智人，地球上最高级的灵长类哺乳动物。具有高度发达的大脑皮层，能够进行复杂逻辑推理、语言表达和社会协作。'},
+  car:{title:'汽车',sub:'CAR · 四轮机动交通工具',desc:'汽车是由发动机驱动、具有四个或更多车轮的陆地交通工具。1885年由卡尔·本茨发明第一辆汽油驱动汽车。'},
+  dog:{title:'狗',sub:'DOG · 犬科驯化动物',desc:'狗（Canis lupus familiaris）是狼的驯化亚种，已与人类共同生活超过15000年。'},
+  cat:{title:'猫',sub:'CAT · 驯化猫科动物',desc:'猫（Felis catus）是小型驯化猫科动物，约在10000年前被驯化。'},
+  'cell phone':{title:'手机',sub:'SMARTPHONE · 多功能移动终端',desc:'智能手机是集通话、上网、拍照、导航等功能于一体的移动计算设备。'},
+  laptop:{title:'笔记本电脑',sub:'LAPTOP · 便携计算设备',desc:'笔记本电脑是一种小型、便携的个人计算机，集成显示屏、键盘和触控板于一体。'}
+};
+
+const PALETTE = ['#FFD60A','#32D74B','#0A84FF','#FF9F0A','#FF375F','#BF5AF2','#5E5CE6','#30D158'];
+
+const appSettings = {
+  useFrontCam:false, highAccuracy:true, nightVision:true,
+  showHud:true, cloudCollab:true, targetScope:'all', baseThreshold:0.20, voiceTTS:true
+};
+
+let yoloModel=null, isZH=true, currentMode='snap', liveStream=null, liveRunning=false;
+let trackerData=[], clickableBoxes=[], frameCount=0, lastPreds=[];
+let currentCardBoxData = null;
+let currentCardCropB64 = '';
+
+	// ─── AI 连接管理 ────────────────────────────────────────────
+	let aiBackend = 'none';   // 'proxy' | 'direct' | 'none'
+	const DIRECT_API_URL = 'https://api.deepseek.com/chat/completions';
+	const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+
+	function detectAIBackend() {
+	  var proxyUrl = localStorage.getItem('ds_proxy_url');
+	  var apiKey = localStorage.getItem('ds_api_key');
+	  if (proxyUrl) aiBackend = 'proxy';
+	  else if (apiKey) aiBackend = 'direct';
+	  else aiBackend = 'none';
+	  updateAIStatus();
+	}
+
+	function updateAIStatus() {
+	  const dot = document.getElementById('ai-dot');
+	  const text = document.getElementById('ai-text');
+	  if (!dot || !text) return;
+	  const states = {
+	    proxy:  { cls: 'ready',  txt: 'AI: 代理模式' },
+	    direct: { cls: 'ready',  txt: 'AI: 直连' },
+	    none:   { cls: 'error',  txt: 'AI: 未配置' }
+	  };
+	  const s = states[aiBackend] || states.none;
+	  dot.className = 'status-indicator ' + s.cls;
+	  dot.style.cssText = 'width:6px;height:6px';
+	  text.textContent = s.txt;
+	}
+
+	function showAIStatusDetail() {
+	  const msgs = {
+	    proxy: '代理模式\n通过代理服务器调用 DeepSeek API',
+	    direct: '直连模式\nAPI Key 存储在浏览器本地',
+	    none: 'AI 服务未配置\n请在设置中填入 API Key'
+	  };
+	  const msg = msgs[aiBackend] || msgs.none;
+	  const toast = document.createElement('div');
+	  toast.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(30,30,30,0.92);color:#fff;padding:10px 20px;border-radius:12px;z-index:200;font-size:13px;white-space:pre-line;text-align:center;border:0.5px solid rgba(255,255,255,0.15);backdrop-filter:blur(20px);';
+	  toast.textContent = msg;
+	  document.body.appendChild(toast);
+	  setTimeout(function() { toast.remove(); }, 2500);
+	}
+
+	// 离屏 canvas 用于 YOLO 预处理
+const offscreen=document.createElement('canvas');
+offscreen.width=640; offscreen.height=640;
+const offCtx=offscreen.getContext('2d',{willReadFrequently:true});
+
+const $=id=>document.getElementById(id);
+
+// ─── 语言与设置 ────────────────────────────────────────────────
+function toggleLang(){
+  isZH=!isZH;
+  $('btn-lang').textContent=isZH?'EN':'中';
+  $('mode-upload').textContent=isZH?'静态解析':'PHOTO';
+  $('mode-snap').textContent=isZH?'单帧捕获':'CAPTURE';
+  $('mode-live').textContent=isZH?'实时计算':'LIVE';
+  $('hud-title').textContent=isZH?'全局分类统计':'ANALYTICS HUD';
+}
+function setStatus(text,dot='ready'){
+  $('status-text').innerHTML=`<span>${text}</span>`;
+  $('status-dot').className='status-indicator '+dot;
+}
+function openSettings(){
+  document.getElementById('settings-modal').classList.add('show');
+  document.getElementById('inp-api-key').value = localStorage.getItem('ds_api_key') || '';
+  document.getElementById('inp-proxy-url').value = localStorage.getItem('ds_proxy_url') || '';
+  document.getElementById('ai-status-detail').textContent = {
+    proxy: '代理模式（通过代理服务器调用）',
+    direct: '直连模式（Key 在浏览器本地）',
+    none: '未配置 — 请填入 API Key'
+  }[aiBackend] || '未知';
+}
+function closeSettings(){$('settings-modal').classList.remove('show')}
+function saveProxyUrl(val) {
+  if (val) localStorage.setItem('ds_proxy_url', val);
+  else localStorage.removeItem('ds_proxy_url');
+  detectAIBackend();
+}
+function saveApiKey(val) {
+  if (val) localStorage.setItem('ds_api_key', val);
+  else localStorage.removeItem('ds_api_key');
+  detectAIBackend();
+}
+// ─── V12: 缓存层 ──────────────────────────────────────────────────
+function cacheKey(prefix, classId, b64data) {
+  var hashRaw = classId + (b64data || '').slice(0, 64);
+  var hash = 0;
+  for (var i = 0; i < hashRaw.length; i++) {
+    var chr = hashRaw.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0;
+  }
+  return 'ds_cache_' + prefix + '_' + Math.abs(hash);
+}
+
+function cacheGet(key) {
+  try {
+    var raw = localStorage.getItem(key);
+    if (!raw) return null;
+    var entry = JSON.parse(raw);
+    if (Date.now() - entry.ts > 86400000) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return entry.result;
+  } catch (e) { return null; }
+}
+
+function cacheSet(key, result) {
+  try {
+    var allKeys = Object.keys(localStorage).filter(function(k) { return k.startsWith('ds_cache_'); });
+    if (allKeys.length >= 100) {
+      var sorted = allKeys.map(function(k) {
+        var entry = localStorage.getItem(k);
+        var ts = 0;
+        try { ts = JSON.parse(entry).ts || 0; } catch(e) {}
+        return {k: k, ts: ts};
+      }).sort(function(a, b) { return a.ts - b.ts; });
+      sorted.slice(0, 10).forEach(function(e) { localStorage.removeItem(e.k); });
+    }
+    localStorage.setItem(key, JSON.stringify({ ts: Date.now(), result: result }));
+  } catch (e) { console.warn('缓存写入失败:', e); }
+}
+
+// ─── DeepSeek API 调用 ───────────────────────────────────────
+async function callDeepSeek(messages) {
+  var apiKey = localStorage.getItem('ds_api_key');
+  var proxyUrl = localStorage.getItem('ds_proxy_url');
+
+  if (!apiKey && !proxyUrl) {
+    return { success: false, error: 'AI 服务未配置。请在设置中填入 API Key' };
+  }
+
+  var reqBody = {
+    model: DEEPSEEK_MODEL,
+    messages: messages,
+    max_tokens: 300
+  };
+
+  // 代理模式：通过 Vercel 代理转发
+  if (proxyUrl) {
+    try {
+      var resp = await fetch(proxyUrl + '/api/deepseek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: apiKey, model: reqBody.model, messages: reqBody.messages, max_tokens: reqBody.max_tokens })
+      });
+      if (!resp.ok) {
+        var errData = await resp.json().catch(function() { return {}; });
+        throw new Error(errData.error || 'HTTP ' + resp.status);
+      }
+      var data = await resp.json();
+      var content = data.choices ? data.choices[0].message.content : '';
+      return { success: true, content: content };
+    } catch (e) {
+      console.warn('代理调用失败:', e.message);
+      // 如果代理失败且有 API Key，回退到直连
+      if (apiKey) return callDeepSeekDirect(reqBody, apiKey);
+      return { success: false, error: '代理不可用: ' + e.message };
+    }
+  }
+
+  // 直连模式：浏览器直接调用 DeepSeek API
+  return callDeepSeekDirect(reqBody, apiKey);
+}
+
+async function callDeepSeekDirect(reqBody, apiKey) {
+  try {
+    var resp = await fetch(DIRECT_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(reqBody)
+    });
+    if (!resp.ok) {
+      if (resp.status === 401) return { success: false, error: 'API Key 无效，请检查设置' };
+      if (resp.status === 429) return { success: false, error: '请求过于频繁，请稍后重试' };
+      return { success: false, error: 'API 错误 (' + resp.status + ')' };
+    }
+    var data = await resp.json();
+    var content = data.choices ? data.choices[0].message.content : '';
+    return { success: true, content: content };
+  } catch (e) {
+    return { success: false, error: '网络连接失败: ' + e.message };
+  }
+}
+function updateScope(val){appSettings.targetScope=val}
+function toggleSetting(type){
+  if(type==='camera'){
+    appSettings.useFrontCam=!appSettings.useFrontCam;
+    $('tog-cam').classList.toggle('on',appSettings.useFrontCam);
+    if(liveRunning){stopLive();toggleLive();}
+  }else if(type==='accuracy'){
+    appSettings.highAccuracy=!appSettings.highAccuracy;
+    $('tog-acc').classList.toggle('on',appSettings.highAccuracy);
+    appSettings.baseThreshold=appSettings.highAccuracy?0.20:0.35;
+  }else if(type==='night'){
+    appSettings.nightVision=!appSettings.nightVision;
+    $('tog-night').classList.toggle('on',appSettings.nightVision);
+    $('video').classList.toggle('night-vision-on',appSettings.nightVision);
+    $('static-img').classList.toggle('night-vision-on',appSettings.nightVision);
+  }else if(type==='hud'){
+    appSettings.showHud=!appSettings.showHud;
+    $('tog-hud').classList.toggle('on',appSettings.showHud);
+    if(!appSettings.showHud)$('analytics-hud').classList.remove('show');
+  }else if(type==='card'){
+    appSettings.cloudCollab=!appSettings.cloudCollab;
+    document.getElementById('tog-card').classList.toggle('on',appSettings.cloudCollab);
+    if(!appSettings.cloudCollab && window.speechSynthesis) window.speechSynthesis.cancel();
+  }else if(type==='voice'){
+    appSettings.voiceTTS=!appSettings.voiceTTS;
+    $('tog-voice').classList.toggle('on',appSettings.voiceTTS);
+    if(!appSettings.voiceTTS && window.speechSynthesis) window.speechSynthesis.cancel();
+  }
+}
+function setMode(mode){
+  if(currentMode==='live'&&liveRunning&&mode!=='live')stopLive();
+  currentMode=mode;
+  ['upload','snap','live'].forEach(m=>{$(`mode-${m}`).className=`mode-item${m===mode?' active':''}`;});
+  const inner=$('shutter-inner'),btn=$('shutter-btn');
+  btn.classList.remove('is-live-running');
+  if(mode==='upload'){inner.className='show-upload';inner.style.background='white';}
+  else if(mode==='snap'){inner.className='';inner.style.background='white';}
+  else{inner.className='';inner.style.background=liveRunning?'var(--live-red)':'white';if(liveRunning)btn.classList.add('is-live-running');}
+}
+function onMainAction(){
+  if(!yoloModel)return;
+  if(currentMode==='upload')$('file-input').click();
+  else if(currentMode==='snap')captureMode();
+  else toggleLive();
+}
+
+// ─── YOLO 推理 (修复了内存和异步阻塞卡顿问题) ──────────────────
+function getLetterboxPad(w,h,size=640){
+  const scale=Math.min(size/w,size/h);
+  return{scale,padX:(size-w*scale)/2,padY:(size-h*scale)/2};
+}
+async function runYolo(mediaEl){
+  const w=mediaEl.videoWidth||mediaEl.naturalWidth;
+  const h=mediaEl.videoHeight||mediaEl.naturalHeight;
+  if(!w||!h)return[];
+  const{scale,padX,padY}=getLetterboxPad(w,h,640);
+  offCtx.fillStyle='#000';offCtx.fillRect(0,0,640,640);
+  if(appSettings.nightVision)offCtx.filter='brightness(1.4) contrast(1.2)';
+  else offCtx.filter='none';
+  offCtx.drawImage(mediaEl,padX,padY,w*scale,h*scale);
+
+  // 不使用 dataSync() 阻塞 UI，改用异步提取数据并手动回收内存
+  const t = tf.browser.fromPixels(offscreen).div(255).expandDims(0);
+  const out = yoloModel.predict(t);
+  const trans = out.transpose([0,2,1]);
+  const raw = await trans.data(); // 异步等待，UI可以继续渲染特效
+
+  // 手动清理防止内存溢出
+  t.dispose();
+  out.dispose();
+  trans.dispose();
+
+  const boxes=[];
+  const thresh=appSettings.baseThreshold;
+  for(let i=0;i<8400;i++){
+    const off=i*84;
+    let maxScore=0,classIdx=-1;
+    for(let c=0;c<80;c++){const s=raw[off+4+c];if(s>maxScore){maxScore=s;classIdx=c;}}
+    if(maxScore<thresh)continue;
+    const clsName=YOLO_CLASSES[classIdx];
+    if(appSettings.targetScope!=='all'){
+      const allowed=SCOPE_MAP[appSettings.targetScope];
+      if(!allowed||!allowed.includes(clsName))continue;
+    }
+    const cx=raw[off],cy=raw[off+1],bw=raw[off+2],bh=raw[off+3];
+    boxes.push({
+      bbox:[(cx-bw/2-padX)/scale,(cy-bh/2-padY)/scale,bw/scale,bh/scale],
+      class:clsName,score:maxScore
+    });
+  }
+  return applyNMS(boxes);
+}
+
+// ─── NMS & Tracking ─────────────────────────────────────────────────
+function iouCalc(a,b){
+  const[ax,ay,aw,ah]=a.bbox,[bx,by,bw,bh]=b.bbox;
+  const ix=Math.max(ax,bx),iy=Math.max(ay,by);
+  const iw=Math.min(ax+aw,bx+bw)-ix,ih=Math.min(ay+ah,by+bh)-iy;
+  if(iw<=0||ih<=0)return 0;
+  const inter=iw*ih;
+  return inter/(aw*ah+bw*bh-inter);
+}
+function applyNMS(preds,iouThresh=0.45,ioMinThresh=0.50){
+  const sorted=[...preds].sort((a,b)=>b.score-a.score);
+  const selected=[];
+  for(const p of sorted){
+    let dup=false;
+    for(const s of selected){
+      if(p.class===s.class){
+        const iou=iouCalc(p,s);
+        const[ax,ay,aw,ah]=p.bbox,[bx,by,bw,bh]=s.bbox;
+        const ix=Math.max(ax,bx),iy=Math.max(ay,by);
+        const iw=Math.min(ax+aw,bx+bw)-ix,ih=Math.min(ay+ah,by+bh)-iy;
+        const inter=(iw>0&&ih>0)?iw*ih:0;
+        const ioMin=inter/Math.min(aw*ah,bw*bh);
+        if(iou>iouThresh||ioMin>ioMinThresh){dup=true;break;}
+      }
+    }
+    if(!dup)selected.push(p);
+  }
+  return selected.slice(0,15);
+}
+
+function updateTracker(newPreds){
+  const SMOOTH=0.25,THRESH=0.22,MAX_MISS=2;
+  const matched=new Set(),next=[];
+  for(const track of trackerData){
+    let best=null,bestIoU=0,bestIdx=-1;
+    for(let i=0;i<newPreds.length;i++){
+      if(matched.has(i)||newPreds[i].class!==track.class)continue;
+      const iou=iouCalc(track,newPreds[i]);
+      if(iou>bestIoU&&iou>THRESH){bestIoU=iou;best=newPreds[i];bestIdx=i;}
+    }
+    if(best){
+      matched.add(bestIdx);
+      const[tx,ty,tw,th]=track.bbox,[nx,ny,nw,nh]=best.bbox;
+      track.bbox=[tx+(nx-tx)*SMOOTH,ty+(ny-ty)*SMOOTH,tw+(nw-tw)*SMOOTH,th+(nh-th)*SMOOTH];
+      track.score=track.score*0.6+best.score*0.4;
+      track.missingFrames=0;next.push(track);
+    }else{
+      track.missingFrames=(track.missingFrames||0)+1;
+      if(track.missingFrames<=MAX_MISS)next.push(track);
+    }
+  }
+  for(let i=0;i<newPreds.length;i++)if(!matched.has(i))next.push({...newPreds[i],missingFrames:0});
+  trackerData=next;return trackerData;
+}
+
+// ─── 渲染与自适应 ────────────────────────────────────────────────
+function getMediaRenderParams(mediaEl,containerEl,fitMode='cover'){
+  let mw=mediaEl.videoWidth||mediaEl.naturalWidth;
+  let mh=mediaEl.videoHeight||mediaEl.naturalHeight;
+  if(!mw||!mh)return null;
+  const cw=containerEl.clientWidth,ch=containerEl.clientHeight;
+  const sx=cw/mw,sy=ch/mh;
+  const scale=fitMode==='cover'?Math.max(sx,sy):Math.min(sx,sy);
+  const rw=mw*scale,rh=mh*scale;
+  const offsetX=(cw-rw)/2,offsetY=(ch-rh)/2;
+  return{scale,offsetX,offsetY,cw,ch};
+}
+function syncCanvasSize(){
+  const vp=$('viewport'),ov=$('overlay');
+  if(ov.width!==vp.clientWidth||ov.height!==vp.clientHeight){ov.width=vp.clientWidth;ov.height=vp.clientHeight;}
+}
+window.addEventListener('resize',()=>{
+  syncCanvasSize();
+  if(!liveRunning&&trackerData.length>0){
+    const el=currentMode==='upload'?$('static-img'):$('video');
+    drawBoxes($('overlay').getContext('2d'),trackerData,getMediaRenderParams(el,$('viewport'),currentMode==='upload'?'contain':'cover'));
+  }
+});
+
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+function updateHUD(preds){
+  const hud=$('analytics-hud');
+  if(!appSettings.showHud||!preds.length){hud.classList.remove('show');return;}
+  hud.classList.add('show');
+  const counts={};
+  preds.forEach(p=>{if(!p.missingFrames)counts[p.class]=(counts[p.class]||0)+1;});
+  $('hud-content').innerHTML=Object.entries(counts).map(([cls,n])=>{
+    const ci=cls.split('').reduce((a,b)=>a+b.charCodeAt(0),0)%PALETTE.length;
+    const name=(LOCAL_KB[cls]&&LOCAL_KB[cls].title)||LABELS_ZH[cls]||cls;
+    return`<div class="hud-row"><div class="hud-dot-wrap"><div class="hud-dot" style="background:${PALETTE[ci]}"></div><span>${name}</span></div><span class="hud-count">${n}</span></div>`;
+  }).join('');
+}
+function drawBoxes(ctx,preds,rp){
+  ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+  clickableBoxes=[];
+  if(!rp)return;
+  const{scale,offsetX,offsetY,cw}=rp;
+  preds.forEach(p=>{
+    ctx.globalAlpha=p.missingFrames>0?0.4:1;
+    let x=p.bbox[0]*scale+offsetX;
+    const y=p.bbox[1]*scale+offsetY,w=p.bbox[2]*scale,h=p.bbox[3]*scale;
+    if(appSettings.useFrontCam&&currentMode!=='upload')x=cw-x-w;
+    clickableBoxes.push({...p,screenBox:[x,y,w,h]});
+    const ci=p.class.split('').reduce((a,b)=>a+b.charCodeAt(0),0)%PALETTE.length;
+    const color=PALETTE[ci];
+    const cs=Math.min(w,h,30);
+    // 角标框
+    ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineCap='round';
+    ctx.globalAlpha=(p.missingFrames>0?0.4:1)*0.15;
+    roundRect(ctx,x,y,w,h,6);ctx.stroke();
+    ctx.globalAlpha=p.missingFrames>0?0.4:1;
+    ctx.beginPath();ctx.moveTo(x,y+cs);ctx.lineTo(x,y);ctx.lineTo(x+cs,y);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+w-cs,y);ctx.lineTo(x+w,y);ctx.lineTo(x+w,y+cs);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,y+h-cs);ctx.lineTo(x,y+h);ctx.lineTo(x+cs,y+h);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+w-cs,y+h);ctx.lineTo(x+w,y+h);ctx.lineTo(x+w,y+h-cs);ctx.stroke();
+    // 标签
+    const kb=LOCAL_KB[p.class];
+    const name=kb?kb.title:(LABELS_ZH[p.class]||p.class);
+    const txt=`${name}  ${Math.round(p.score*100)}%`;
+    ctx.font='600 12px -apple-system,system-ui,sans-serif';
+    const tw=ctx.measureText(txt).width;
+    const ph=24,pw=tw+20,pr=12;
+    const px=Math.max(2,Math.min(x+w/2-pw/2,ctx.canvas.width-pw-2));
+    const py=y-ph-8<0?y+8:y-ph-8;
+    ctx.save();roundRect(ctx,px,py,pw,ph,pr);
+    ctx.fillStyle='rgba(20,20,20,0.78)';ctx.fill();
+    ctx.fillStyle=color;ctx.beginPath();ctx.arc(px+10,py+ph/2,4,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+    ctx.fillStyle='#fff';ctx.font='600 12px -apple-system,system-ui,sans-serif';
+    ctx.fillText(txt,px+20,py+16);
+    ctx.globalAlpha=1;
+  });
+  updateHUD(preds);
+}
+function clearAll(){
+  const ov=$('overlay');
+  if(ov&&ov.getContext)ov.getContext('2d').clearRect(0,0,ov.width,ov.height);
+  $('analytics-hud').classList.remove('show');
+  trackerData=[];clickableBoxes=[];
+}
+
+	// --- 加载与控制流 -----------------------------------------------
+	async function loadModel(){
+	  $('progress-container').style.opacity='1';
+	  setStatus('YOLOv8 加载中...','loading');
+	  $('progress-bar').style.width='0%';
+	  await tf.ready();
+
+	  // 1) IndexedDB cache first
+	  try {
+	    setStatus('读取本地缓存...','loading');
+	    yoloModel = await promiseWithTimeout(
+	      tf.loadGraphModel('indexeddb://'+MODEL_CACHE_KEY),
+	      5000
+	    );
+	    $('progress-bar').style.width='100%';
+	    tf.tidy(function(){yoloModel.predict(tf.zeros([1,640,640,3]));});
+	    setTimeout(function(){
+	      $('progress-container').style.opacity='0';
+	      setStatus('YOLOv8 就绪 - 80类目标 (缓存)','ready');
+	      detectAIBackend();
+	    },400);
+	    console.log('YOLO: IndexedDB cache hit');
+	    return;
+	  } catch(e) {
+	    console.log('YOLO: cache miss, trying CDNs...');
+	  }
+
+	  // 2) CDN fallback chain with real progress
+	  let loaded = false;
+	  for (let i=0; i<MODEL_CDN_URLS.length; i++) {
+	    const url = MODEL_CDN_URLS[i];
+	    try {
+	      setStatus('下载模型 ('+(i+1)+'/'+MODEL_CDN_URLS.length+')...','loading');
+	      $('progress-bar').style.width='5%';
+	      console.log('YOLO: trying CDN', url);
+	      yoloModel = await promiseWithTimeout(
+	        tf.loadGraphModel(url, {
+	          onProgress: function(fraction) {
+	            const pct = Math.round(fraction*100);
+	            $('progress-bar').style.width = pct+'%';
+	            setStatus('下载中 '+pct+'% (源'+(i+1)+')','loading');
+	          }
+	        }),
+	        60000
+	      );
+	      loaded = true;
+	      console.log('YOLO: CDN success, saving to IndexedDB');
+	      break;
+	    } catch(e) {
+	      console.warn('YOLO: CDN fail', url, e.message);
+	    }
+	  }
+
+	  if (!loaded) {
+	    $('progress-container').style.opacity='0';
+	    setStatus('模型下载失败 - 请检查网络','error');
+	    return;
+	  }
+
+	  // 3) Save to IndexedDB
+	  try {
+	    await yoloModel.save('indexeddb://'+MODEL_CACHE_KEY);
+	    console.log('YOLO: saved to IndexedDB');
+	  } catch(e) {
+	    console.warn('YOLO: IndexedDB save failed', e.message);
+	  }
+
+	  // 4) Warm up + done
+	  tf.tidy(function(){yoloModel.predict(tf.zeros([1,640,640,3]));});
+	  $('progress-bar').style.width='100%';
+	  setTimeout(function(){
+	    $('progress-container').style.opacity='0';
+	    setStatus('YOLOv8 就绪 - 80类目标','ready');
+	    detectAIBackend();
+	  },400);
+	}
+
+	// Promise timeout wrapper
+	function promiseWithTimeout(promise, ms) {
+	  return Promise.race([
+	    promise,
+	    new Promise(function(_, reject) {
+	      setTimeout(function(){ reject(new Error('timeout')); }, ms);
+	    })
+	  ]);
+	}
+async function getCameraStream(){
+  const stream=await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:appSettings.useFrontCam?'user':'environment',width:{ideal:1280},height:{ideal:720}}
+  });
+  $('video').style.transform=appSettings.useFrontCam?'scaleX(-1)':'scaleX(1)';
+  return stream;
+}
+
+async function handleFile(e){
+  const file=e.target.files[0];if(!file)return;
+  const img=new Image();
+  img.onload=async()=>{
+    $('video').style.display='none';
+    $('static-img').src=img.src;$('static-img').style.display='block';
+    setStatus('YOLOv8 解析中...','loading');clearAll();
+    await new Promise(r=>setTimeout(r,100));
+    const preds=await runYolo(img);
+    trackerData=preds;syncCanvasSize();
+    drawBoxes($('overlay').getContext('2d'),preds,getMediaRenderParams($('static-img'),$('viewport'),'contain'));
+    setStatus(`解析完成 · ${preds.length} 个目标`,'ready');
+  };
+  img.src=URL.createObjectURL(file);e.target.value='';
+}
+
+async function captureMode(){
+  try{
+    const stream=await getCameraStream();
+    const video=$('video'),vp=$('viewport');
+    $('static-img').style.display='none';video.style.display='block';
+    video.srcObject=stream;await video.play();
+    setStatus('捕获帧中...','loading');clearAll();
+    vp.style.background='#fff';video.style.opacity='0.5';
+    setTimeout(()=>{vp.style.background='#111';video.style.opacity='1';},150);
+    await new Promise(r=>setTimeout(r,900));
+    const preds=await runYolo(video);
+    trackerData=preds;syncCanvasSize();
+    drawBoxes($('overlay').getContext('2d'),preds,getMediaRenderParams(video,vp,'cover'));
+    // 彻底释放硬件流
+    stream.getTracks().forEach(t=>t.stop());
+    video.srcObject=null;
+    setStatus(`捕获完成 · ${preds.length} 个目标`,'ready');
+  }catch(err){setStatus('摄像头访问失败','error');}
+}
+
+async function toggleLive(){
+  if(liveRunning){stopLive();return;}
+  try{
+    liveStream=await getCameraStream();
+    const video=$('video'),vp=$('viewport');
+    $('static-img').style.display='none';video.style.display='block';
+    video.srcObject=liveStream;await video.play();
+    liveRunning=true;trackerData=[];frameCount=0;lastPreds=[];
+    $('shutter-btn').classList.add('is-live-running');
+    $('shutter-inner').style.background='var(--live-red)';
+    setStatus('YOLOv8 实时计算中','ready');clearAll();
+    const ctx=$('overlay').getContext('2d');
+    async function detectLoop(){
+      if(!liveRunning)return;
+      if(video.readyState===4){
+        syncCanvasSize();
+        const rp=getMediaRenderParams(video,vp,'cover');
+        if(frameCount%2===0){
+          const preds=await runYolo(video);
+          lastPreds=preds;
+          trackerData=updateTracker(preds);
+        }
+        drawBoxes(ctx,trackerData,rp);
+        frameCount++;
+      }
+      if(liveRunning)requestAnimationFrame(detectLoop);
+    }
+    detectLoop();
+  }catch(err){setStatus('摄像头访问失败','error');}
+}
+function stopLive(){
+  liveRunning=false;trackerData=[];
+  if(liveStream){
+    liveStream.getTracks().forEach(t=>t.stop());
+    liveStream=null;
+    $('video').srcObject=null; // 释放占用，关闭指示灯
+  }
+  $('shutter-btn').classList.remove('is-live-running');
+  $('shutter-inner').style.background='white';
+  clearAll();setStatus('YOLOv8 就绪 · 80类目标','ready');
+}
+
+// ─── 知识卡片交互 ─────────────────────────────────────────────
+$('overlay').addEventListener('click',e=>{
+  if(!appSettings.cloudCollab)return;
+  const rect=e.target.getBoundingClientRect();
+  const x=e.clientX-rect.left,y=e.clientY-rect.top;
+  
+  const ripple=document.createElement('div');
+  ripple.className='touch-ripple';ripple.style.left=`${x}px`;ripple.style.top=`${y}px`;
+  $('overlay').parentNode.appendChild(ripple);
+  setTimeout(()=>ripple.remove(),600);
+  
+  let clickedBox=null;
+  for(let i=clickableBoxes.length-1;i>=0;i--){
+    const[bx,by,bw,bh]=clickableBoxes[i].screenBox;
+    if(x>=bx-20&&x<=bx+bw+20&&y>=by-20&&y<=by+bh+20){clickedBox=clickableBoxes[i];break;}
+  }
+  if(clickedBox)showKnowledgeCard(clickedBox);
+  else showAreaAnalysis(x,y);
+});
+
+function cropToBase64(sx,sy,sw,sh){
+  const sourceMedia=currentMode==='upload'?$('static-img'):$('video');
+  const mw=sourceMedia.videoWidth||sourceMedia.naturalWidth;
+  const mh=sourceMedia.videoHeight||sourceMedia.naturalHeight;
+
+  // Clamp 限制，防止 YOLO 输出边界外的负数导致 Canvas DrawImage 崩溃
+  const safeX = Math.max(0, Math.floor(sx));
+  const safeY = Math.max(0, Math.floor(sy));
+  const safeW = Math.min(Math.floor(sw), mw - safeX);
+  const safeH = Math.min(Math.floor(sh), mh - safeY);
+
+  if(safeW<=0 || safeH<=0) return ''; // 目标太小或完全在屏幕外
+
+  const c=document.createElement('canvas');
+  c.width=safeW; c.height=safeH;
+  c.getContext('2d').drawImage(sourceMedia,safeX,safeY,safeW,safeH,0,0,safeW,safeH);
+  return c.toDataURL('image/jpeg');
+}
+
+function speakText(text) {
+  if (!appSettings.voiceTTS || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel(); // 停止当前正在播放的语音
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = isZH ? 'zh-CN' : 'en-US';
+  utterance.rate = 1.05; // 稍微调快语速使其更自然
+  window.speechSynthesis.speak(utterance);
+}
+
+function showKnowledgeLoading(text) {
+  document.getElementById('knowledge-sheet').classList.add('show');
+  document.getElementById('k-loading-area').style.display = 'flex';
+  document.getElementById('k-content-area').style.display = 'none';
+  document.getElementById('k-loading-txt').textContent = text || 'AI 分析中...';
+}
+
+function showKnowledgeError(msg) {
+  document.getElementById('knowledge-sheet').classList.add('show');
+  document.getElementById('k-loading-area').style.display = 'none';
+  document.getElementById('k-content-area').style.display = 'block';
+  document.getElementById('k-badge').className = 'k-badge';
+  document.getElementById('k-badge').textContent = '错误';
+  document.getElementById('k-title').textContent = '分析失败';
+  document.getElementById('k-sub').textContent = '';
+  document.getElementById('k-desc').textContent = msg;
+  document.getElementById('k-link').style.display = 'none';
+  document.getElementById('btn-deep-analysis').style.display = 'none';
+}
+
+function showKnowledgeResult(opts) {
+  document.getElementById('knowledge-sheet').classList.add('show');
+  document.getElementById('k-loading-area').style.display = 'none';
+  document.getElementById('k-content-area').style.display = 'block';
+  var badgeEl = document.getElementById('k-badge');
+  badgeEl.textContent = opts.isCache ? (opts.badge + ' (缓存)') : opts.badge;
+  if (opts.badgeClass) badgeEl.className = opts.badgeClass;
+  else badgeEl.className = 'k-badge';
+  document.getElementById('k-title').textContent = opts.title;
+  document.getElementById('k-sub').textContent = opts.sub;
+  document.getElementById('k-desc').textContent = opts.desc;
+  document.getElementById('k-link').style.display = opts.showLink !== false ? 'block' : 'none';
+  document.getElementById('btn-deep-analysis').style.display = 'none';
+  if (appSettings.voiceTTS && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    var utterance = new SpeechSynthesisUtterance(opts.desc);
+    utterance.lang = isZH ? 'zh-CN' : 'en-US';
+    utterance.rate = 1.05;
+    window.speechSynthesis.speak(utterance);
+  }
+}
+
+function showKnowledgeCard(boxData){
+  currentCardBoxData = boxData;
+  currentCardCropB64 = cropToBase64(boxData.bbox[0], boxData.bbox[1], boxData.bbox[2], boxData.bbox[3]);
+  document.getElementById('k-img').src = currentCardCropB64;
+  var kb = LOCAL_KB[boxData.class];
+  var zhName = kb ? kb.title : (LABELS_ZH[boxData.class] || boxData.class);
+
+  if (kb) {
+    document.getElementById('knowledge-sheet').classList.add('show');
+    document.getElementById('k-badge').className = 'k-badge';
+    document.getElementById('k-badge').textContent = '本地知识图谱';
+    document.getElementById('k-title').textContent = kb.title;
+    document.getElementById('k-sub').textContent = kb.sub;
+    document.getElementById('k-desc').textContent = kb.desc;
+    document.getElementById('k-link').href = 'https://baike.baidu.com/item/' + encodeURIComponent(zhName);
+    document.getElementById('k-link').style.display = 'block';
+    document.getElementById('btn-deep-analysis').style.display = 'block';
+    document.getElementById('k-loading-area').style.display = 'none';
+    document.getElementById('k-content-area').style.display = 'block';
+    if (appSettings.voiceTTS) speakText(kb.desc);
+  } else {
+    showKnowledgeLoading('AI 即时分析中...');
+    var cKey = cacheKey('instant', boxData.class, currentCardCropB64);
+    var cached = cacheGet(cKey);
+
+    if (cached) {
+      showKnowledgeResult({
+        badge: 'AI 即时分析',
+        badgeClass: 'k-badge ai-instant',
+        title: zhName,
+        sub: boxData.class.toUpperCase() + ' · DEEPSEEK',
+        desc: cached,
+        showLink: false,
+        isCache: true
+      });
+      return;
+    }
+
+    var messages = [{
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: currentCardCropB64 } },
+        { type: 'text', text: 'YOLO识别为【' + boxData.class + ' ' + zhName + '】。请详细介绍一下这个目标：它是什么、有什么特征、用途是什么。用简洁的中文回答，不超过200字。' }
+      ]
+    }];
+
+    callDeepSeek(messages).then(function(resp) {
+      if (!resp.success) {
+        document.getElementById('knowledge-sheet').classList.add('show');
+        document.getElementById('k-badge').className = 'k-badge';
+        document.getElementById('k-badge').textContent = 'YOLO 检测';
+        document.getElementById('k-title').textContent = zhName;
+        document.getElementById('k-sub').textContent = boxData.class.toUpperCase() + ' · 置信度 ' + Math.round(boxData.score * 100) + '%';
+        document.getElementById('k-desc').textContent = '已识别目标：' + zhName + '（置信度 ' + Math.round(boxData.score * 100) + '%）。AI 分析暂时不可用：' + resp.error;
+        document.getElementById('k-link').href = 'https://baike.baidu.com/item/' + encodeURIComponent(zhName);
+        document.getElementById('k-link').style.display = 'block';
+        document.getElementById('btn-deep-analysis').style.display = 'none';
+        document.getElementById('k-loading-area').style.display = 'none';
+        document.getElementById('k-content-area').style.display = 'block';
+        return;
+      }
+      var result = resp.content;
+      cacheSet(cKey, result);
+      showKnowledgeResult({
+        badge: 'AI 即时分析',
+        badgeClass: 'k-badge ai-instant',
+        title: zhName,
+        sub: boxData.class.toUpperCase() + ' · DEEPSEEK',
+        desc: result,
+        showLink: false,
+        isCache: false
+      });
+    });
+  }
+}
+
+async function triggerDeepAnalysis() {
+  if (!currentCardBoxData || !currentCardCropB64) return;
+  var boxData = currentCardBoxData;
+  var zhName = (LOCAL_KB[boxData.class] && LOCAL_KB[boxData.class].title) || LABELS_ZH[boxData.class] || boxData.class;
+
+  showKnowledgeLoading('AI 深度分析中...');
+
+  var cKey = cacheKey('deep', boxData.class, currentCardCropB64);
+  var cached = cacheGet(cKey);
+
+  if (cached) {
+    showKnowledgeResult({
+      badge: 'AI 深度分析',
+      badgeClass: 'k-badge ai-deep',
+      title: zhName,
+      sub: 'DEEPSEEK · ' + boxData.class.toUpperCase(),
+      desc: cached,
+      showLink: false,
+      isCache: true
+    });
+    return;
+  }
+
+  var messages = [{
+    role: 'user',
+    content: [
+      { type: 'image_url', image_url: { url: currentCardCropB64 } },
+      { type: 'text', text: 'YOLO识别为【' + boxData.class + ' ' + zhName + '】。请详细介绍一下这个目标：它是什么、有什么特征、用途是什么。用简洁的中文回答，不超过200字。' }
+    ]
+  }];
+
+  var resp = await callDeepSeek(messages);
+  if (!resp.success) {
+    showKnowledgeError(resp.error);
+    return;
+  }
+  var result = resp.content;
+  cacheSet(cKey, result);
+  showKnowledgeResult({
+    badge: 'AI 深度分析',
+    badgeClass: 'k-badge ai-deep',
+    title: zhName,
+    sub: 'DEEPSEEK · ' + boxData.class.toUpperCase(),
+    desc: result,
+    showLink: false,
+    isCache: false
+  });
+}
+
+async function showAreaAnalysis(x, y) {
+  showKnowledgeLoading('AI 开放识别中...');
+
+  var sourceMedia = currentMode === 'upload' ? document.getElementById('static-img') : document.getElementById('video');
+  var rp = getMediaRenderParams(sourceMedia, document.getElementById('viewport'), currentMode === 'upload' ? 'contain' : 'cover');
+  var cropSize = 200;
+
+  var cropB64 = '';
+  if (rp) {
+    var rx = (x - rp.offsetX) / rp.scale - cropSize / 2;
+    var ry = (y - rp.offsetY) / rp.scale - cropSize / 2;
+    cropB64 = cropToBase64(rx, ry, cropSize, cropSize);
+  }
+
+  if (!cropB64) {
+    showKnowledgeError('无法获取该区域图像');
+    return;
+  }
+
+  document.getElementById('k-img').src = cropB64;
+
+  var cKey = cacheKey('open', '', cropB64);
+  var cached = cacheGet(cKey);
+
+  if (cached) {
+    showKnowledgeResult({
+      badge: 'AI 开放识别',
+      badgeClass: 'k-badge ai-instant',
+      title: 'AI 推测',
+      sub: 'OPEN-WORLD RECOGNITION',
+      desc: cached,
+      showLink: false,
+      isCache: true
+    });
+    return;
+  }
+
+  var messages = [{
+    role: 'user',
+    content: [
+      { type: 'image_url', image_url: { url: cropB64 } },
+      { type: 'text', text: '请识别图中最显著的目标是什么，用中文简短回答（名称+一两句话描述）。如果什么都看不出来就说"无法识别"。' }
+    ]
+  }];
+
+  var resp = await callDeepSeek(messages);
+  if (!resp.success) {
+    showKnowledgeError(resp.error);
+    return;
+  }
+  var result = resp.content;
+  cacheSet(cKey, result);
+  showKnowledgeResult({
+    badge: 'AI 开放识别',
+    badgeClass: 'k-badge ai-instant',
+    title: 'AI 推测',
+    sub: 'OPEN-WORLD RECOGNITION',
+    desc: result,
+    showLink: false,
+    isCache: false
+  });
+}
+
+onTfReady(function() { loadModel(); });
+</script>
+</body>
+</html>
